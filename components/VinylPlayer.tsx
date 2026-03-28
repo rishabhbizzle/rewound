@@ -94,9 +94,14 @@ export default function VinylPlayer({
     }
   }, [audio.progress, photos.length, needleDropped, haptics]);
 
-  // Celebration on completion — resets each time audio reaches end
+  // Celebration on completion
+  // Triggers at 95% progress OR when audio naturally ends (isPlaying flips to false near end)
+  const audioFinished =
+    (audio.progress >= 0.95 || (!audio.isPlaying && audio.progress > 0.8)) &&
+    needleDropped;
+
   useEffect(() => {
-    if (audio.progress >= 0.98 && !celebratedRef.current && needleDropped) {
+    if (audioFinished && !celebratedRef.current) {
       celebratedRef.current = true;
       setCelebrate(true);
       haptics.celebration();
@@ -111,7 +116,7 @@ export default function VinylPlayer({
       setCelebrate(false);
       setShowNote(false);
     }
-  }, [audio.progress, needleDropped, haptics, noteData]);
+  }, [audioFinished, audio.progress, haptics, noteData]);
 
   const handleSleeveReveal = useCallback(() => {
     setStage("turntable");

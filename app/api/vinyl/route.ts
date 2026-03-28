@@ -25,14 +25,14 @@ export async function POST(request: NextRequest) {
 
     if (audioFile.size > MAX_AUDIO_SIZE) {
       return NextResponse.json(
-        { error: "Audio file must be under 10MB" },
+        { error: `Audio file too large: ${(audioFile.size / 1024 / 1024).toFixed(1)}MB (max 10MB)` },
         { status: 400 }
       );
     }
 
     if (photoFiles.length > MAX_PHOTOS) {
       return NextResponse.json(
-        { error: `Maximum ${MAX_PHOTOS} photos allowed` },
+        { error: `Too many photos: ${photoFiles.length} (max ${MAX_PHOTOS})` },
         { status: 400 }
       );
     }
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     if (audioError) {
       console.error("Audio upload error:", audioError);
       return NextResponse.json(
-        { error: "Failed to upload audio" },
+        { error: `Audio upload failed: ${audioError.message}` },
         { status: 500 }
       );
     }
@@ -67,10 +67,14 @@ export async function POST(request: NextRequest) {
 
     // Upload photos
     const photoUrls: string[] = [];
+    const photoErrors: string[] = [];
 
     for (let i = 0; i < photoFiles.length; i++) {
       const photo = photoFiles[i];
-      if (photo.size > MAX_PHOTO_SIZE) continue;
+      if (photo.size > MAX_PHOTO_SIZE) {
+        photoErrors.push(`Photo ${i + 1} skipped: ${(photo.size / 1024 / 1024).toFixed(1)}MB (max 5MB)`);
+        continue;
+      }
 
       const photoExt = photo.name.split(".").pop() || "jpg";
       const photoPath = `${vinylId}/${timestamp}_${i}.${photoExt}`;
@@ -85,6 +89,7 @@ export async function POST(request: NextRequest) {
 
       if (photoError) {
         console.error(`Photo ${i} upload error:`, photoError);
+        photoErrors.push(`Photo ${i + 1} failed: ${photoError.message}`);
         continue;
       }
 
@@ -108,16 +113,20 @@ export async function POST(request: NextRequest) {
     if (dbError) {
       console.error("DB insert error:", dbError);
       return NextResponse.json(
-        { error: "Failed to save vinyl" },
+        { error: `Database error: ${dbError.message} (code: ${dbError.code})` },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ id: vinylId });
+    return NextResponse.json({
+      id: vinylId,
+      ...(photoErrors.length > 0 && { warnings: photoErrors }),
+    });
   } catch (error) {
     console.error("Vinyl creation error:", error);
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: "Something went wrong" },
+      { error: `Unexpected error: ${message}` },
       { status: 500 }
     );
   }

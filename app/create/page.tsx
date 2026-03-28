@@ -2,9 +2,10 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import Image from "next/image";
 import { saveVinyl, generateId } from "@/lib/store";
-import HandwrittenNote from "@/components/HandwrittenNote";
+import { processImages } from "@/lib/imageUtils";
+import HandwrittenNote, { HandwrittenNoteRef } from "@/components/HandwrittenNote";
+import SortablePhotoGrid from "@/components/SortablePhotoGrid";
 
 type Step = "audio" | "photos" | "customize" | "note" | "pressing";
 
@@ -41,6 +42,7 @@ export default function CreatePage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [micError, setMicError] = useState(false);
 
+  const noteRef = useRef<HandwrittenNoteRef>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
@@ -113,28 +115,27 @@ export default function CreatePage() {
     setError(null);
   }, []);
 
-  const handlePhotoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const [processingPhotos, setProcessingPhotos] = useState(false);
+
+  const handlePhotoUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).slice(0, 10 - photoUrls.length);
+    if (files.length === 0) return;
 
-    // Check sizes and warn about skipped ones
-    const validFiles: File[] = [];
-    let skipped = 0;
-    for (const f of files) {
-      if (f.size > 5 * 1024 * 1024) {
-        skipped++;
-      } else {
-        validFiles.push(f);
-      }
-    }
+    setProcessingPhotos(true);
 
-    if (skipped > 0) {
-      setError(`${skipped} photo${skipped > 1 ? "s" : ""} skipped (over 5MB)`);
+    try {
+      // Process images client-side: resize to 1200px max, compress to WebP
+      const processed = await processImages(files);
+
+      const urls = processed.map((f) => URL.createObjectURL(f));
+      setPhotoUrls((prev) => [...prev, ...urls].slice(0, 10));
+      setPhotoFiles((prev) => [...prev, ...processed].slice(0, 10));
+    } catch {
+      setError("Failed to process photos");
       setTimeout(() => setError(null), 3000);
+    } finally {
+      setProcessingPhotos(false);
     }
-
-    const urls = validFiles.map((f) => URL.createObjectURL(f));
-    setPhotoUrls((prev) => [...prev, ...urls].slice(0, 10));
-    setPhotoFiles((prev) => [...prev, ...validFiles].slice(0, 10));
   }, [photoUrls.length]);
 
   const removePhoto = useCallback((index: number) => {
@@ -142,11 +143,19 @@ export default function CreatePage() {
     setPhotoFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const reorderPhotos = useCallback((newUrls: string[], newIndices: number[]) => {
+    setPhotoUrls(newUrls);
+    setPhotoFiles((prev) => newIndices.map((i) => prev[i]));
+  }, []);
+
   const handlePress = useCallback(async () => {
     if (!audioFile) return;
     setStep("pressing");
     setError(null);
     setUploadProgress(0);
+
+    // Grab the drawing from canvas right now
+    const finalNoteData = noteRef.current?.getDataUrl() ?? noteData;
 
     const useSupabase = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
 
@@ -157,7 +166,7 @@ export default function CreatePage() {
         formData.append("artist", artist || "Anonymous");
         formData.append("vinylColor", vinylColor);
         formData.append("audio", audioFile);
-        if (noteData) formData.append("noteData", noteData);
+        if (finalNoteData) formData.append("noteData", finalNoteData);
         photoFiles.forEach((f) => formData.append("photos", f));
 
         // Use XMLHttpRequest for upload progress
@@ -221,7 +230,7 @@ export default function CreatePage() {
         vinylColor,
         audioUrl: audioDataUrl,
         photos: photoDataUrls,
-        noteData,
+        noteData: finalNoteData,
         createdAt: Date.now(),
       });
 
@@ -410,32 +419,14 @@ export default function CreatePage() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
           >
-            <div className="grid grid-cols-3 gap-2 w-full">
-              {photoUrls.map((photo, i) => (
-                <div key={i} className="relative aspect-[3/4] rounded-xl overflow-hidden group">
-                  <Image src={photo} alt={`Photo ${i + 1}`} fill className="object-cover" unoptimized />
-                  <button
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 text-white/70 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity"
-                    onClick={() => removePhoto(i)}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-
-              {photoUrls.length < 10 && (
-                <button
-                  className="aspect-[3/4] rounded-xl border-2 border-dashed border-white/10 hover:border-white/20 active:border-white/25 flex flex-col items-center justify-center gap-1.5 text-white/20 hover:text-white/40 transition-all"
-                  onClick={() => photoInputRef.current?.click()}
-                >
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  <span className="text-[10px]">Add</span>
-                </button>
-              )}
-            </div>
+            <SortablePhotoGrid
+              photoUrls={photoUrls}
+              onReorder={reorderPhotos}
+              onRemove={removePhoto}
+              onAdd={() => photoInputRef.current?.click()}
+              processingPhotos={processingPhotos}
+              maxPhotos={10}
+            />
 
             <input
               ref={photoInputRef}
@@ -564,9 +555,8 @@ export default function CreatePage() {
             exit={{ opacity: 0, x: -20 }}
           >
             <HandwrittenNote
+              ref={noteRef}
               mode="create"
-              onSave={(data) => setNoteData(data)}
-              onClear={() => setNoteData(null)}
             />
 
             <p className="text-xs text-white/20 text-center max-w-[250px]">
