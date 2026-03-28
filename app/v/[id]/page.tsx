@@ -1,0 +1,116 @@
+import { Metadata } from "next";
+import { getSupabaseServerClient, VinylRow } from "@/lib/supabase";
+import { getVinyl } from "@/lib/store";
+import VinylPlayerWrapper from "./VinylPlayerWrapper";
+
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+async function fetchVinyl(id: string): Promise<VinylRow | null> {
+  // Try Supabase first
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    try {
+      const supabase = getSupabaseServerClient();
+      const { data } = await supabase
+        .from("vinyls")
+        .select("*")
+        .eq("id", id)
+        .single();
+      return data;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+// Dynamic OG meta tags for rich link previews
+export async function generateMetadata({
+  params,
+}: PageProps): Promise<Metadata> {
+  const { id } = await params;
+  const vinyl = await fetchVinyl(id);
+
+  if (!vinyl) {
+    return { title: "Rewound" };
+  }
+
+  const description = `${vinyl.artist} pressed a vinyl just for you. Spin to listen.`;
+  const ogImage = vinyl.photos?.[0] || undefined;
+
+  return {
+    title: `${vinyl.title} — Rewound`,
+    description,
+    openGraph: {
+      title: vinyl.title,
+      description,
+      type: "website",
+      ...(ogImage && { images: [{ url: ogImage, width: 600, height: 600 }] }),
+    },
+    twitter: {
+      card: ogImage ? "summary_large_image" : "summary",
+      title: vinyl.title,
+      description,
+    },
+  };
+}
+
+export default async function VinylPage({ params }: PageProps) {
+  const { id } = await params;
+
+  // Try Supabase
+  const vinyl = await fetchVinyl(id);
+
+  if (vinyl) {
+    return (
+      <VinylPlayerWrapper
+        id={vinyl.id}
+        title={vinyl.title}
+        artist={vinyl.artist}
+        vinylColor={vinyl.vinyl_color}
+        audioUrl={vinyl.audio_url}
+        photos={vinyl.photos}
+        noteData={vinyl.note_data}
+        firstPlayedAt={vinyl.first_played_at}
+        useSupabase
+      />
+    );
+  }
+
+  // Fallback: try in-memory store (local dev without Supabase)
+  const localVinyl = getVinyl(id);
+
+  if (localVinyl) {
+    return (
+      <VinylPlayerWrapper
+        id={localVinyl.id}
+        title={localVinyl.title}
+        artist={localVinyl.artist}
+        vinylColor={localVinyl.vinylColor}
+        audioUrl={localVinyl.audioUrl}
+        photos={localVinyl.photos}
+        noteData={localVinyl.noteData}
+        firstPlayedAt={null}
+        useSupabase={false}
+      />
+    );
+  }
+
+  // Not found
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#0a0a0a] text-white/40 gap-4">
+      <div className="text-6xl mb-2">💿</div>
+      <p className="text-lg">This vinyl wasn&apos;t found</p>
+      <p className="text-sm text-white/20">
+        It may have expired or the link might be wrong.
+      </p>
+      <a
+        href="/"
+        className="mt-4 px-6 py-2 rounded-full bg-white/5 text-white/40 text-sm hover:bg-white/10 transition-all"
+      >
+        Press your own vinyl
+      </a>
+    </div>
+  );
+}

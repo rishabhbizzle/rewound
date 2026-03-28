@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --vinyl-black: #1a1a1a;
+  --vinyl-groove: #222;
+  --warm-gold: #c8a96e;
+  --warm-amber: #d4a056;
 }
 
 @theme inline {
@@ -12,15 +16,150 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Film grain overlay */
+.film-grain::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.5;
+}
+
+/* Vinyl grooves */
+.vinyl-grooves {
+  background: repeating-radial-gradient(
+    circle at center,
+    transparent 0px,
+    transparent 2.5px,
+    rgba(255, 255, 255, 0.03) 2.5px,
+    rgba(255, 255, 255, 0.03) 3px
+  );
+}
+
+/* Holographic sheen on vinyl */
+.vinyl-sheen {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.04) 5%,
+    transparent 10%,
+    rgba(255, 255, 255, 0.02) 20%,
+    transparent 25%,
+    rgba(255, 255, 255, 0.05) 35%,
+    transparent 40%,
+    rgba(255, 255, 255, 0.02) 50%,
+    transparent 55%,
+    rgba(255, 255, 255, 0.04) 65%,
+    transparent 70%,
+    rgba(255, 255, 255, 0.02) 80%,
+    transparent 85%,
+    rgba(255, 255, 255, 0.03) 95%,
+    transparent 100%
+  );
+}
+
+/* Vinyl color variants */
+.vinyl-red {
+  background-color: #3d0000 !important;
+}
+.vinyl-red .vinyl-grooves {
+  background: repeating-radial-gradient(
+    circle at center,
+    transparent 0px,
+    transparent 2.5px,
+    rgba(255, 100, 100, 0.04) 2.5px,
+    rgba(255, 100, 100, 0.04) 3px
+  );
+}
+
+.vinyl-blue {
+  background-color: #000033 !important;
+}
+.vinyl-blue .vinyl-grooves {
+  background: repeating-radial-gradient(
+    circle at center,
+    transparent 0px,
+    transparent 2.5px,
+    rgba(100, 100, 255, 0.04) 2.5px,
+    rgba(100, 100, 255, 0.04) 3px
+  );
+}
+
+.vinyl-clear {
+  background-color: rgba(60, 60, 60, 0.7) !important;
+}
+
+/* Waveform groove effect */
+@keyframes groovePulse {
+  0%, 100% { opacity: 0.03; }
+  50% { opacity: 0.06; }
+}
+
+/* Dust particle float */
+@keyframes dustFloat {
+  0% {
+    transform: translateY(0px) translateX(0px);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(-100vh) translateX(50px);
+    opacity: 0;
+  }
+}
+
+/* Bokeh glow */
+@keyframes bokehFloat {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.1;
+  }
+  50% {
+    transform: translate(30px, -20px) scale(1.2);
+    opacity: 0.2;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.1;
+  }
+}
+
+/* Seal peel */
+@keyframes sealShine {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.seal-shine {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 45%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0.1) 55%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: sealShine 3s ease-in-out infinite;
+}
+
+/* Smooth touch */
+.touch-none {
+  touch-action: none;
 }
