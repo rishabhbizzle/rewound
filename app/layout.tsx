@@ -14,11 +14,17 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Rewound",
-  description: "Send a voice note on wax. Spin to listen.",
+  description: "Press your voice onto wax. Send it to someone special. They spin to listen.",
   openGraph: {
-    title: "Rewound",
-    description: "Someone pressed a vinyl just for you. Spin to listen.",
+    title: "rewound",
+    description: "Press your voice onto wax. Send it to someone special. They spin to listen.",
     type: "website",
+    siteName: "rewound",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "rewound",
+    description: "Press your voice onto wax. Spin to listen.",
   },
 };
 
