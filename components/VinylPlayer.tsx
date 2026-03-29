@@ -40,7 +40,6 @@ export default function VinylPlayer({
   const [celebrate, setCelebrate] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [noteUnlocked, setNoteUnlocked] = useState(false);
-  const wasMovingRef = useRef(false);
   const celebratedRef = useRef(false);
   const lastPhotoRef = useRef(-1);
 
@@ -59,9 +58,9 @@ export default function VinylPlayer({
   const audio = useAudioEngine(audioUrl);
   const haptics = useHaptics();
 
-  // Sync audio with spin
+  // Sync audio with spin — only works after audio is unlocked
   useEffect(() => {
-    if (!needleDropped) return;
+    if (!needleDropped || !audio.isUnlocked) return;
 
     if (isMoving && playbackRate > 0.05) {
       if (!audio.isPlaying) {
@@ -77,8 +76,6 @@ export default function VinylPlayer({
       audio.setCrackleVolume(0);
       audio.setScratchVolume(0);
     }
-
-    wasMovingRef.current = isMoving;
   }, [isMoving, playbackRate, needleDropped, isReversing, audio]);
 
   // Haptic on photo reveal
@@ -94,8 +91,7 @@ export default function VinylPlayer({
     }
   }, [audio.progress, photos.length, needleDropped, haptics]);
 
-  // Celebration on completion
-  // Triggers at 95% progress OR when audio naturally ends (isPlaying flips to false near end)
+  // Celebration
   const audioFinished =
     (audio.progress >= 0.95 || (!audio.isPlaying && audio.progress > 0.8)) &&
     needleDropped;
@@ -110,7 +106,6 @@ export default function VinylPlayer({
         setTimeout(() => setShowNote(true), 2500);
       }
     }
-    // Reset when audio loops back (manual seek or replay)
     if (audio.progress < 0.1 && celebratedRef.current) {
       celebratedRef.current = false;
       setCelebrate(false);
@@ -123,16 +118,17 @@ export default function VinylPlayer({
     setTimeout(() => setStage("playing"), 900);
   }, []);
 
-  const handleNeedleDrop = useCallback(() => {
+  // Needle drop = THE user gesture that unlocks audio on iOS
+  const handleNeedleDrop = useCallback(async () => {
     setNeedleDropped(true);
     haptics.needleDrop();
-  }, [haptics]);
+    await audio.unlock();
+  }, [haptics, audio]);
 
   const toggleAutoplay = useCallback(() => {
     setAutoplay((prev) => !prev);
   }, [setAutoplay]);
 
-  // Seekable progress bar
   const handleProgressSeek = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const rect = e.currentTarget.getBoundingClientRect();
@@ -143,12 +139,12 @@ export default function VinylPlayer({
     [audio]
   );
 
-  // Tap-to-unmute: user gesture triggers AudioContext resume + play
+  // "Tap to enable audio" banner — second chance to unlock
   const handleUnblock = useCallback(async () => {
-    await audio.play();
-    // Also start autoplay so the vinyl spins after unblocking
-    if (!autoplay) setAutoplay(true);
-  }, [audio, autoplay, setAutoplay]);
+    await audio.unlock();
+    // Start autoplay after unlocking
+    setAutoplay(true);
+  }, [audio, setAutoplay]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -156,9 +152,12 @@ export default function VinylPlayer({
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  // Show the "tap to enable" banner if needle is dropped but audio isn't unlocked
+  const showAudioBanner = needleDropped && !audio.isUnlocked && audio.isLoaded;
+
   return (
     <div className="relative flex flex-col min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 overflow-hidden">
-      {needleDropped && (
+      {needleDropped && audio.isUnlocked && (
         <MoodAmbient
           getFrequencyData={audio.getFrequencyData}
           isPlaying={isMoving}
@@ -168,19 +167,27 @@ export default function VinylPlayer({
       <DustParticles />
       <Celebration trigger={celebrate} />
 
-      {/* Audio blocked banner */}
-      {audio.playbackBlocked && needleDropped && (
-        <motion.div
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center py-3 px-4 bg-amber-900/80 backdrop-blur-sm"
-          initial={{ y: -50 }}
-          animate={{ y: 0 }}
-          onClick={handleUnblock}
-        >
-          <p className="text-xs text-amber-100 font-mono text-center">
-            tap anywhere to enable audio
-          </p>
-        </motion.div>
-      )}
+      {/* Audio unlock banner */}
+      <AnimatePresence>
+        {showAudioBanner && (
+          <motion.button
+            className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center py-4 px-4 bg-amber-900/90 backdrop-blur-sm active:bg-amber-800/90"
+            initial={{ y: -60 }}
+            animate={{ y: 0 }}
+            exit={{ y: -60 }}
+            onClick={handleUnblock}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-amber-100" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              </svg>
+              <span className="text-sm text-amber-100 font-medium">
+                Tap here to enable audio
+              </span>
+            </div>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Sleeve stage */}
       <AnimatePresence>
@@ -281,13 +288,13 @@ export default function VinylPlayer({
 
           {/* Bottom controls */}
           <motion.div
-            className="px-4 pb-[max(env(safe-area-inset-bottom),1rem)] flex flex-col items-center gap-2"
+            className="px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] flex flex-col items-center gap-2"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6 }}
           >
             {/* Waveform */}
-            {needleDropped && (
+            {needleDropped && audio.isUnlocked && (
               <motion.div
                 className="w-full max-w-[320px] h-12"
                 initial={{ opacity: 0, scaleY: 0 }}
@@ -337,7 +344,6 @@ export default function VinylPlayer({
                       className="h-full bg-gradient-to-r from-amber-700/50 to-amber-500/30 rounded-full relative"
                       style={{ width: `${audio.progress * 100}%` }}
                     >
-                      {/* Seek thumb — visible on hover */}
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-amber-400/70 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </div>
@@ -351,7 +357,7 @@ export default function VinylPlayer({
 
             {/* Controls row */}
             <div className="flex items-center gap-3">
-              {needleDropped && (
+              {needleDropped && audio.isUnlocked && (
                 <motion.button
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-mono transition-all ${
                     autoplay
@@ -382,7 +388,6 @@ export default function VinylPlayer({
                 </motion.button>
               )}
 
-              {/* Note toggle — available once unlocked */}
               {noteData && noteUnlocked && (
                 <motion.button
                   className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-mono bg-white/5 text-white/30 border border-white/5 hover:bg-white/8 transition-all"
@@ -422,7 +427,7 @@ export default function VinylPlayer({
               </motion.p>
             )}
 
-            {needleDropped && !isMoving && !autoplay && !isReversing && (
+            {needleDropped && !isMoving && !autoplay && !isReversing && audio.isUnlocked && (
               <motion.p
                 className="text-xs text-white/15 font-mono tracking-wider"
                 animate={{ opacity: [0.15, 0.35, 0.15] }}
