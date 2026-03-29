@@ -458,6 +458,12 @@ export default function CreatePage() {
               {photoUrls.length}/10 photos — these become your album art
             </p>
 
+            {photoUrls.length === 0 && (
+              <p className="text-xs text-amber-400/50">
+                add at least 1 photo to continue
+              </p>
+            )}
+
             <div className="flex gap-3 mt-4">
               <button
                 className="px-6 py-3 rounded-full bg-white/5 text-white/30 text-sm hover:bg-white/10 transition-all"
@@ -466,9 +472,13 @@ export default function CreatePage() {
                 Back
               </button>
               <motion.button
-                className="px-8 py-3 rounded-full bg-white/10 text-white/70 font-medium hover:bg-white/15 transition-all"
-                onClick={() => goToStep("customize")}
-                whileTap={{ scale: 0.97 }}
+                className={`px-8 py-3 rounded-full font-medium transition-all ${
+                  photoUrls.length > 0
+                    ? "bg-white/10 text-white/70 hover:bg-white/15"
+                    : "bg-white/5 text-white/20 cursor-not-allowed"
+                }`}
+                onClick={() => photoUrls.length > 0 && goToStep("customize")}
+                whileTap={photoUrls.length > 0 ? { scale: 0.97 } : {}}
               >
                 Next
               </motion.button>
