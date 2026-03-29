@@ -55,28 +55,27 @@ export default function VinylPlayer({
     pointerHandlers,
   } = useVinylSpin(spinEnabled);
 
-  const audio = useAudioEngine(audioUrl);
+  const audio = useAudioEngine();
   const haptics = useHaptics();
 
-  // Sync: spinning forward → volume 1, reverse → scratch, stopped → volume 0
-  // NEVER calls play() or pause() — only volume + rate changes
+  // Simple: spinning forward = play, anything else = pause
   useEffect(() => {
     if (!needleDropped) return;
 
     if (isMoving && !isReversing) {
-      audio.setVolume(1);
+      audio.play();
       audio.setPlaybackRate(playbackRate);
       audio.setScratchVolume(0);
     } else if (isReversing) {
-      audio.setVolume(0);
+      audio.pause();
       audio.setScratchVolume(0.5);
     } else {
-      audio.setVolume(0);
+      audio.pause();
       audio.setScratchVolume(0);
     }
   }, [isMoving, isReversing, playbackRate, needleDropped, audio]);
 
-  // Photo reveal haptic
+  // Photo reveal
   useEffect(() => {
     if (photos.length === 0 || !needleDropped) return;
     const idx = Math.min(Math.floor(audio.progress * photos.length), photos.length - 1);
@@ -109,17 +108,16 @@ export default function VinylPlayer({
     setTimeout(() => setStage("playing"), 900);
   }, []);
 
-  // Needle drop = user gesture. start() plays silently, volume controls the rest.
+  // Needle drop — prime audio in user gesture, DON'T start playing
   const handleNeedleDrop = useCallback(() => {
     setNeedleDropped(true);
     haptics.needleDrop();
-    audio.start();
+    audio.prime();
     audio.initScratch();
   }, [haptics, audio]);
 
   const toggleAutoplay = useCallback(() => {
-    // Also start audio here as backup (user gesture)
-    audio.start();
+    audio.prime(); // backup prime in user gesture
     setAutoplay((prev) => !prev);
   }, [setAutoplay, audio]);
 
@@ -136,10 +134,23 @@ export default function VinylPlayer({
     return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
   };
 
-  const audible = isMoving && !isReversing;
+  const audible = isMoving && !isReversing && audio.isPlaying;
 
   return (
     <div className="relative flex flex-col min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 overflow-hidden">
+      {/* DOM audio element — playsInline is critical for iOS */}
+      {audioUrl && (
+        <audio
+          ref={audio.audioRef}
+          src={audioUrl}
+          preload="auto"
+          playsInline
+          onLoadedMetadata={audio.onLoadedMetadata}
+          onTimeUpdate={audio.onTimeUpdate}
+          className="hidden"
+        />
+      )}
+
       {needleDropped && <MoodAmbient isPlaying={audible} />}
       <DustParticles />
       <Celebration trigger={celebrate} />

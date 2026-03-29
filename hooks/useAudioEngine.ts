@@ -1,55 +1,53 @@
 "use client";
-import { useRef, useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useState, useEffect, type RefObject } from "react";
 
-export function useAudioEngine(src: string | null) {
+export function useAudioEngine() {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const startedRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const primedRef = useRef(false);
 
   // Scratch SFX
   const scratchCtxRef = useRef<AudioContext | null>(null);
   const scratchGainRef = useRef<GainNode | null>(null);
 
-  useEffect(() => {
-    if (!src) return;
-
-    const audio = new Audio(src);
-    audio.preload = "auto";
-    audio.volume = 0; // Start silent
-    audio.loop = true; // Loop so it never ends and we don't need to re-play
-    audioRef.current = audio;
-
-    audio.addEventListener("loadedmetadata", () => {
-      setDuration(audio.duration);
+  const onLoadedMetadata = useCallback(() => {
+    if (audioRef.current) {
+      setDuration(audioRef.current.duration);
       setIsLoaded(true);
-    });
-    audio.addEventListener("timeupdate", () => {
-      setCurrentTime(audio.currentTime);
-    });
-
-    return () => {
-      audio.pause();
-      audio.src = "";
-      audioRef.current = null;
-      startedRef.current = false;
-    };
-  }, [src]);
-
-  // Call ONCE from a user gesture (needle drop / autoplay tap).
-  // After this, audio is "playing" silently forever. We use volume to control sound.
-  const start = useCallback(() => {
-    if (startedRef.current || !audioRef.current) return;
-    audioRef.current.volume = 0;
-    audioRef.current.play().catch(() => {});
-    startedRef.current = true;
+    }
   }, []);
 
-  // Volume: 0 = silent, 1 = audible. NOT play/pause.
-  const setVolume = useCallback((v: number) => {
-    if (audioRef.current) audioRef.current.volume = Math.max(0, Math.min(1, v));
+  const onTimeUpdate = useCallback(() => {
+    if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
+  }, []);
+
+  // Call from user gesture to prime iOS. Plays and pauses immediately.
+  const prime = useCallback(() => {
+    if (primedRef.current || !audioRef.current) return;
+    primedRef.current = true;
+    const a = audioRef.current;
+    a.play().then(() => {
+      a.pause();
+      a.currentTime = 0;
+      setIsPlaying(false);
+    }).catch(() => {
+      primedRef.current = false;
+    });
+  }, []);
+
+  const play = useCallback(() => {
+    if (!audioRef.current || !audioRef.current.paused) return;
+    audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+  }, []);
+
+  const pause = useCallback(() => {
+    if (!audioRef.current || audioRef.current.paused) return;
+    audioRef.current.pause();
+    setIsPlaying(false);
   }, []);
 
   const setPlaybackRate = useCallback((rate: number) => {
@@ -61,13 +59,12 @@ export function useAudioEngine(src: string | null) {
     audioRef.current.currentTime = Math.max(0, Math.min(p * duration, duration));
   }, [duration]);
 
-  // Scratch SFX init — call from user gesture
+  // Scratch SFX
   const initScratch = useCallback(() => {
     if (scratchCtxRef.current) return;
     try {
       const ctx = new AudioContext();
       scratchCtxRef.current = ctx;
-
       const sLen = ctx.sampleRate * 0.6;
       const buf = ctx.createBuffer(1, sLen, ctx.sampleRate);
       const d = buf.getChannelData(0);
@@ -106,12 +103,17 @@ export function useAudioEngine(src: string | null) {
   const progress = duration > 0 ? currentTime / duration : 0;
 
   return {
+    audioRef: audioRef as RefObject<HTMLAudioElement>,
     duration,
     currentTime,
     progress,
     isLoaded,
-    start,
-    setVolume,
+    isPlaying,
+    onLoadedMetadata,
+    onTimeUpdate,
+    prime,
+    play,
+    pause,
     setPlaybackRate,
     seekToProgress,
     initScratch,
