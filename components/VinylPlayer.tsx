@@ -10,6 +10,7 @@ import Waveform from "./Waveform";
 import Celebration from "./Celebration";
 import MoodAmbient from "./MoodAmbient";
 import HandwrittenNote from "./HandwrittenNote";
+import Link from "next/link";
 import { useVinylSpin } from "@/hooks/useVinylSpin";
 import { useAudioEngine } from "@/hooks/useAudioEngine";
 import { useHaptics } from "@/hooks/useHaptics";
@@ -151,6 +152,18 @@ export default function VinylPlayer({
         />
       )}
 
+      {/* Create your own — top right */}
+      <Link href="/create">
+        <motion.div
+          className="fixed top-[max(env(safe-area-inset-top),0.75rem)] right-4 z-30 px-3 py-1.5 rounded-full bg-white/5 border border-white/5 text-[10px] font-mono text-white/25 hover:text-amber-400/50 hover:border-amber-500/10 transition-all active:scale-95"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.5 }}
+        >
+          create vinyl
+        </motion.div>
+      </Link>
+
       {needleDropped && <MoodAmbient isPlaying={audible} />}
       <DustParticles />
       <Celebration trigger={celebrate} />
@@ -195,7 +208,7 @@ export default function VinylPlayer({
             )}
           </motion.div>
 
-          <motion.div className="px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] flex flex-col items-center gap-2"
+          <motion.div className="px-4 mb-5 pb-[max(env(safe-area-inset-bottom),1.5rem)] flex flex-col items-center gap-2"
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
 
             {needleDropped && (
@@ -260,12 +273,12 @@ export default function VinylPlayer({
               </motion.div>
             )}
             {!needleDropped && photos.length > 0 && (
-              <motion.p className="text-xs text-white/20 font-mono tracking-wider" animate={{ opacity: [0.2, 0.5, 0.2] }} transition={{ duration: 2.5, repeat: Infinity }}>
+              <motion.p className="text-sm text-white/40 font-mono" animate={{ opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 2.5, repeat: Infinity }}>
                 tap the tonearm to start
               </motion.p>
             )}
             {needleDropped && !isMoving && !autoplay && (
-              <motion.p className="text-xs text-white/15 font-mono tracking-wider" animate={{ opacity: [0.15, 0.35, 0.15] }} transition={{ duration: 2.5, repeat: Infinity }}>
+              <motion.p className="text-sm text-white/35 font-mono" animate={{ opacity: [0.3, 0.6, 0.3] }} transition={{ duration: 2.5, repeat: Infinity }}>
                 spin the vinyl or tap autoplay
               </motion.p>
             )}
@@ -275,6 +288,7 @@ export default function VinylPlayer({
                 <span className="text-amber-500/40">playing</span>
               </motion.div>
             )}
+
           </motion.div>
         </motion.div>
       )}
