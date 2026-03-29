@@ -6,7 +6,6 @@ interface AudioEngineState {
   currentTime: number;
   isPlaying: boolean;
   isLoaded: boolean;
-  isUnlocked: boolean;
 }
 
 export function useAudioEngine(src: string | null) {
@@ -15,40 +14,36 @@ export function useAudioEngine(src: string | null) {
     currentTime: 0,
     isPlaying: false,
     isLoaded: false,
-    isUnlocked: false,
   });
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const crackleGainRef = useRef<GainNode | null>(null);
   const scratchGainRef = useRef<GainNode | null>(null);
-  const sourceConnectedRef = useRef(false);
-  const unlockedRef = useRef(false);
 
-  // Load audio element
+  // ── Plain HTML Audio — no Web Audio routing, works everywhere ──
   useEffect(() => {
     if (!src) return;
 
     const audio = new Audio();
-    audio.crossOrigin = "anonymous";
     audio.preload = "auto";
+    // No crossOrigin — avoids CORS. No MediaElementSource — avoids iOS hijack.
     audio.src = src;
     audioRef.current = audio;
 
     const onLoaded = () => {
-      setState((prev) => ({
-        ...prev,
-        duration: audio.duration,
-        isLoaded: true,
-      }));
+      setState((prev) => ({ ...prev, duration: audio.duration, isLoaded: true }));
     };
-
     const onTimeUpdate = () => {
       setState((prev) => ({ ...prev, currentTime: audio.currentTime }));
     };
-
     const onEnded = () => {
+      setState((prev) => ({ ...prev, isPlaying: false }));
+    };
+    const onPlay = () => {
+      setState((prev) => ({ ...prev, isPlaying: true }));
+    };
+    const onPause = () => {
       setState((prev) => ({ ...prev, isPlaying: false }));
     };
 
@@ -56,150 +51,117 @@ export function useAudioEngine(src: string | null) {
     audio.addEventListener("canplaythrough", onLoaded);
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("ended", onEnded);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
 
     return () => {
       audio.removeEventListener("loadedmetadata", onLoaded);
       audio.removeEventListener("canplaythrough", onLoaded);
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
       audio.pause();
       audio.src = "";
-      sourceConnectedRef.current = false;
     };
   }, [src]);
 
-  // Create Web Audio graph
-  const initAudioContext = useCallback(() => {
-    if (ctxRef.current || !audioRef.current) return;
-
+  // ── Web Audio for effects ONLY (crackle + scratch) ──
+  // NOT connected to the audio element. Just standalone generated sounds.
+  const initEffects = useCallback(() => {
+    if (ctxRef.current) return;
     try {
       const ctx = new AudioContext();
       ctxRef.current = ctx;
 
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 128;
-      analyser.smoothingTimeConstant = 0.8;
-      analyserRef.current = analyser;
-
-      if (!sourceConnectedRef.current) {
-        const source = ctx.createMediaElementSource(audioRef.current);
-        source.connect(analyser);
-        analyser.connect(ctx.destination);
-        sourceConnectedRef.current = true;
-      }
-
       // Crackle
       const crackleSize = ctx.sampleRate * 2;
-      const crackleBuf = ctx.createBuffer(1, crackleSize, ctx.sampleRate);
-      const crackleData = crackleBuf.getChannelData(0);
+      const buf = ctx.createBuffer(1, crackleSize, ctx.sampleRate);
+      const d = buf.getChannelData(0);
       for (let i = 0; i < crackleSize; i++) {
-        crackleData[i] =
-          Math.random() < 0.002
-            ? (Math.random() - 0.5) * 0.15
-            : (Math.random() - 0.5) * 0.005;
+        d[i] = Math.random() < 0.002 ? (Math.random() - 0.5) * 0.15 : (Math.random() - 0.5) * 0.005;
       }
-      const crackleSource = ctx.createBufferSource();
-      crackleSource.buffer = crackleBuf;
-      crackleSource.loop = true;
-      const crackleFilter = ctx.createBiquadFilter();
-      crackleFilter.type = "lowpass";
-      crackleFilter.frequency.value = 3000;
-      const crackleGain = ctx.createGain();
-      crackleGain.gain.value = 0;
-      crackleGainRef.current = crackleGain;
-      crackleSource.connect(crackleFilter);
-      crackleFilter.connect(crackleGain);
-      crackleGain.connect(ctx.destination);
-      crackleSource.start();
+      const cs = ctx.createBufferSource();
+      cs.buffer = buf;
+      cs.loop = true;
+      const cf = ctx.createBiquadFilter();
+      cf.type = "lowpass";
+      cf.frequency.value = 3000;
+      const cg = ctx.createGain();
+      cg.gain.value = 0;
+      crackleGainRef.current = cg;
+      cs.connect(cf);
+      cf.connect(cg);
+      cg.connect(ctx.destination);
+      cs.start();
 
-      // Scratch SFX
-      const scratchLen = ctx.sampleRate * 0.6;
-      const scratchBuf = ctx.createBuffer(1, scratchLen, ctx.sampleRate);
-      const scratchData = scratchBuf.getChannelData(0);
-      for (let i = 0; i < scratchLen; i++) {
-        const t = i / scratchLen;
+      // Scratch
+      const sLen = ctx.sampleRate * 0.6;
+      const sBuf = ctx.createBuffer(1, sLen, ctx.sampleRate);
+      const sd = sBuf.getChannelData(0);
+      for (let i = 0; i < sLen; i++) {
+        const t = i / sLen;
         const env = t < 0.05 ? t / 0.05 : Math.pow(1 - t, 2);
-        scratchData[i] =
-          ((Math.random() - 0.5) * 0.8 + Math.sin(i * (0.1 + t * 0.4)) * 0.3) * env;
+        sd[i] = ((Math.random() - 0.5) * 0.8 + Math.sin(i * (0.1 + t * 0.4)) * 0.3) * env;
       }
-      const scratchNode = ctx.createBufferSource();
-      scratchNode.buffer = scratchBuf;
-      scratchNode.loop = true;
-      const scratchFilter = ctx.createBiquadFilter();
-      scratchFilter.type = "bandpass";
-      scratchFilter.frequency.value = 1200;
-      scratchFilter.Q.value = 1.5;
-      const scratchGain = ctx.createGain();
-      scratchGain.gain.value = 0;
-      scratchGainRef.current = scratchGain;
-      scratchNode.connect(scratchFilter);
-      scratchFilter.connect(scratchGain);
-      scratchGain.connect(ctx.destination);
-      scratchNode.start();
+      const sn = ctx.createBufferSource();
+      sn.buffer = sBuf;
+      sn.loop = true;
+      const sf = ctx.createBiquadFilter();
+      sf.type = "bandpass";
+      sf.frequency.value = 1200;
+      sf.Q.value = 1.5;
+      const sg = ctx.createGain();
+      sg.gain.value = 0;
+      scratchGainRef.current = sg;
+      sn.connect(sf);
+      sf.connect(sg);
+      sg.connect(ctx.destination);
+      sn.start();
     } catch {
-      // Web Audio not available
+      // Effects unavailable — audio still works fine
     }
   }, []);
 
-  // ═══════════════════════════════════════════════════════════════
-  // UNLOCK — must be called directly from a user gesture (click/tap).
-  // This is the key to iOS audio. It:
-  //   1. Creates + resumes the AudioContext
-  //   2. Plays + immediately pauses the audio element
-  // After this, play()/pause() work freely from useEffects.
-  // ═══════════════════════════════════════════════════════════════
-  const unlock = useCallback(async () => {
-    if (unlockedRef.current) return;
-    if (!audioRef.current || !state.isLoaded) return;
+  // ── Prime — call from user gesture to unlock iOS audio ──
+  const prime = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
 
-    // Init Web Audio in the user gesture
-    initAudioContext();
+    // Init effects in user gesture
+    initEffects();
 
-    // Resume context in the user gesture
+    // Resume AudioContext for effects
     if (ctxRef.current?.state === "suspended") {
-      await ctxRef.current.resume();
+      try { await ctxRef.current.resume(); } catch { /* ok */ }
     }
 
-    // Play + pause to "prime" the audio element on iOS
-    // iOS requires at least one play() in a user gesture
+    // Prime the audio element: play+pause in user gesture unlocks iOS
     try {
-      await audioRef.current.play();
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      await audio.play();
+      audio.pause();
+      audio.currentTime = 0;
     } catch {
-      // If even this fails, try without Web Audio context
-      // (disconnect and play raw)
+      // Might fail if not loaded yet — that's fine, play() will work later
     }
+  }, [initEffects]);
 
-    unlockedRef.current = true;
-    setState((prev) => ({ ...prev, isUnlocked: true, isPlaying: false }));
-  }, [state.isLoaded, initAudioContext]);
-
-  // Play — works freely after unlock()
   const play = useCallback(() => {
-    if (!audioRef.current || !state.isLoaded) return;
+    const audio = audioRef.current;
+    if (!audio) return;
 
-    // If not unlocked yet, we can't play from a non-gesture
-    if (!unlockedRef.current) {
-      return;
-    }
-
-    // Resume context if needed
+    // Resume effects context
     if (ctxRef.current?.state === "suspended") {
-      ctxRef.current.resume();
+      ctxRef.current.resume().catch(() => {});
     }
 
-    audioRef.current.play().then(() => {
-      setState((prev) => ({ ...prev, isPlaying: true }));
-    }).catch(() => {
-      // Shouldn't happen after unlock, but safety net
+    audio.play().catch(() => {
+      // Autoplay blocked — user needs to interact first
     });
-  }, [state.isLoaded]);
+  }, []);
 
   const pause = useCallback(() => {
-    if (!audioRef.current) return;
-    audioRef.current.pause();
-    setState((prev) => ({ ...prev, isPlaying: false }));
+    audioRef.current?.pause();
   }, []);
 
   const setPlaybackRate = useCallback((rate: number) => {
@@ -209,27 +171,19 @@ export function useAudioEngine(src: string | null) {
 
   const seek = useCallback((time: number) => {
     if (!audioRef.current) return;
-    audioRef.current.currentTime = Math.max(
-      0,
-      Math.min(time, audioRef.current.duration || 0)
-    );
+    audioRef.current.currentTime = Math.max(0, Math.min(time, audioRef.current.duration || 0));
   }, []);
 
   const seekToProgress = useCallback(
     (progress: number) => {
       if (!audioRef.current || !state.duration) return;
-      audioRef.current.currentTime = Math.max(
-        0,
-        Math.min(progress * state.duration, state.duration)
-      );
+      audioRef.current.currentTime = Math.max(0, Math.min(progress * state.duration, state.duration));
     },
     [state.duration]
   );
 
   const setCrackleVolume = useCallback((volume: number) => {
-    if (crackleGainRef.current) {
-      crackleGainRef.current.gain.value = Math.max(0, Math.min(1, volume));
-    }
+    if (crackleGainRef.current) crackleGainRef.current.gain.value = Math.max(0, Math.min(1, volume));
   }, []);
 
   const setScratchVolume = useCallback((volume: number) => {
@@ -242,26 +196,16 @@ export function useAudioEngine(src: string | null) {
     }
   }, []);
 
-  const getFrequencyData = useCallback((): Uint8Array => {
-    if (!analyserRef.current) return new Uint8Array(64);
-    const data = new Uint8Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getByteFrequencyData(data);
-    return data;
-  }, []);
-
   useEffect(() => {
-    return () => {
-      ctxRef.current?.close();
-    };
+    return () => { ctxRef.current?.close(); };
   }, []);
 
-  const progress =
-    state.duration > 0 ? state.currentTime / state.duration : 0;
+  const progress = state.duration > 0 ? state.currentTime / state.duration : 0;
 
   return {
     ...state,
     progress,
-    unlock,
+    prime,
     play,
     pause,
     seek,
@@ -269,6 +213,5 @@ export function useAudioEngine(src: string | null) {
     setPlaybackRate,
     setCrackleVolume,
     setScratchVolume,
-    getFrequencyData,
   };
 }
