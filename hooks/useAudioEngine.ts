@@ -20,14 +20,14 @@ export function useAudioEngine(src: string | null) {
   const ctxRef = useRef<AudioContext | null>(null);
   const crackleGainRef = useRef<GainNode | null>(null);
   const scratchGainRef = useRef<GainNode | null>(null);
+  const effectsInitRef = useRef(false);
 
-  // ── Plain HTML Audio — no Web Audio routing, works everywhere ──
+  // ── Load audio via plain HTML element ──
   useEffect(() => {
     if (!src) return;
 
     const audio = new Audio();
     audio.preload = "auto";
-    // No crossOrigin — avoids CORS. No MediaElementSource — avoids iOS hijack.
     audio.src = src;
     audioRef.current = audio;
 
@@ -40,36 +40,27 @@ export function useAudioEngine(src: string | null) {
     const onEnded = () => {
       setState((prev) => ({ ...prev, isPlaying: false }));
     };
-    const onPlay = () => {
-      setState((prev) => ({ ...prev, isPlaying: true }));
-    };
-    const onPause = () => {
-      setState((prev) => ({ ...prev, isPlaying: false }));
-    };
 
     audio.addEventListener("loadedmetadata", onLoaded);
     audio.addEventListener("canplaythrough", onLoaded);
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("ended", onEnded);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
 
     return () => {
       audio.removeEventListener("loadedmetadata", onLoaded);
       audio.removeEventListener("canplaythrough", onLoaded);
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
       audio.pause();
       audio.src = "";
     };
   }, [src]);
 
-  // ── Web Audio for effects ONLY (crackle + scratch) ──
-  // NOT connected to the audio element. Just standalone generated sounds.
+  // ── Effects (crackle + scratch) — standalone Web Audio, not connected to audio element ──
   const initEffects = useCallback(() => {
-    if (ctxRef.current) return;
+    if (effectsInitRef.current) return;
+    effectsInitRef.current = true;
+
     try {
       const ctx = new AudioContext();
       ctxRef.current = ctx;
@@ -119,49 +110,39 @@ export function useAudioEngine(src: string | null) {
       sg.connect(ctx.destination);
       sn.start();
     } catch {
-      // Effects unavailable — audio still works fine
+      // Effects unavailable
     }
   }, []);
 
-  // ── Prime — call from user gesture to unlock iOS audio ──
-  const prime = useCallback(async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // Init effects in user gesture
-    initEffects();
-
-    // Resume AudioContext for effects
-    if (ctxRef.current?.state === "suspended") {
-      try { await ctxRef.current.resume(); } catch { /* ok */ }
-    }
-
-    // Prime the audio element: play+pause in user gesture unlocks iOS
-    try {
-      await audio.play();
-      audio.pause();
-      audio.currentTime = 0;
-    } catch {
-      // Might fail if not loaded yet — that's fine, play() will work later
-    }
-  }, [initEffects]);
-
+  // ── Play: just plays the audio element. State comes from the element's events. ──
   const play = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Resume effects context
+    // Try to resume effects context
     if (ctxRef.current?.state === "suspended") {
       ctxRef.current.resume().catch(() => {});
     }
 
-    audio.play().catch(() => {
-      // Autoplay blocked — user needs to interact first
-    });
+    // Only call play if not already playing
+    if (audio.paused) {
+      audio.play()
+        .then(() => {
+          setState((prev) => ({ ...prev, isPlaying: true }));
+        })
+        .catch(() => {
+          // Autoplay blocked — will work after user gesture
+        });
+    }
   }, []);
 
   const pause = useCallback(() => {
-    audioRef.current?.pause();
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!audio.paused) {
+      audio.pause();
+      setState((prev) => ({ ...prev, isPlaying: false }));
+    }
   }, []);
 
   const setPlaybackRate = useCallback((rate: number) => {
@@ -205,7 +186,7 @@ export function useAudioEngine(src: string | null) {
   return {
     ...state,
     progress,
-    prime,
+    initEffects,
     play,
     pause,
     seek,
