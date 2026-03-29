@@ -58,24 +58,22 @@ export default function VinylPlayer({
   const audio = useAudioEngine(audioUrl);
   const haptics = useHaptics();
 
-  // Sync audio playback with vinyl spin
+  // Spinning forward = play, backwards = scratch, stopped = pause
   useEffect(() => {
     if (!needleDropped) return;
 
-    if (isMoving && playbackRate > 0.05) {
+    if (isMoving && !isReversing) {
       audio.play();
       audio.setPlaybackRate(playbackRate);
-      // Only set effects volume when audio is confirmed playing
-      if (audio.isPlaying) {
-        audio.setCrackleVolume(Math.min(playbackRate * 0.3, 0.4));
-        audio.setScratchVolume(isReversing ? 0.5 : 0);
-      }
+      audio.setScratchVolume(0);
+    } else if (isReversing) {
+      audio.pause();
+      audio.setScratchVolume(0.5);
     } else {
       audio.pause();
-      audio.setCrackleVolume(0);
       audio.setScratchVolume(0);
     }
-  }, [isMoving, playbackRate, needleDropped, isReversing, audio]);
+  }, [isMoving, isReversing, playbackRate, needleDropped, audio]);
 
   // Photo reveal haptic
   useEffect(() => {
@@ -88,11 +86,8 @@ export default function VinylPlayer({
   }, [audio.progress, photos.length, needleDropped, haptics]);
 
   // Celebration
-  const audioFinished =
-    (audio.progress >= 0.95 || (!audio.isPlaying && audio.progress > 0.8)) && needleDropped;
-
   useEffect(() => {
-    if (audioFinished && !celebratedRef.current) {
+    if (audio.progress >= 0.95 && !celebratedRef.current && needleDropped) {
       celebratedRef.current = true;
       setCelebrate(true);
       haptics.celebration();
@@ -106,28 +101,31 @@ export default function VinylPlayer({
       setCelebrate(false);
       setShowNote(false);
     }
-  }, [audioFinished, audio.progress, haptics, noteData]);
+  }, [audio.progress, needleDropped, haptics, noteData]);
 
   const handleSleeveReveal = useCallback(() => {
     setStage("turntable");
     setTimeout(() => setStage("playing"), 900);
   }, []);
 
-  // Needle drop — the user gesture. Init effects + start audio directly.
+  // Needle drop — user gesture, call play() here for iOS
   const handleNeedleDrop = useCallback(() => {
     setNeedleDropped(true);
     haptics.needleDrop();
-    // Init Web Audio effects in this user gesture
-    audio.initEffects();
-    // Directly play audio in this gesture to unlock iOS
+    // Init scratch SFX in user gesture
+    audio.initScratch();
+    // Play in user gesture for iOS, then immediately pause
+    // so it only plays when user spins
     audio.play();
+    setTimeout(() => audio.pause(), 50);
   }, [haptics, audio]);
 
   const toggleAutoplay = useCallback(() => {
-    // Also init effects if not done (this is a user gesture)
-    audio.initEffects();
+    if (!needleDropped) return;
+    // If turning on autoplay, also play in this gesture (iOS backup)
+    audio.play();
     setAutoplay((prev) => !prev);
-  }, [setAutoplay, audio]);
+  }, [setAutoplay, audio, needleDropped]);
 
   const handleProgressSeek = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -146,7 +144,7 @@ export default function VinylPlayer({
 
   return (
     <div className="relative flex flex-col min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 overflow-hidden">
-      {needleDropped && <MoodAmbient isPlaying={isMoving} />}
+      {needleDropped && <MoodAmbient isPlaying={isMoving && audio.isPlaying} />}
       <DustParticles />
       <Celebration trigger={celebrate} />
 
@@ -227,8 +225,8 @@ export default function VinylPlayer({
           >
             {/* Waveform */}
             {needleDropped && (
-              <motion.div className="w-full max-w-[320px] h-12" initial={{ opacity: 0, scaleY: 0 }} animate={{ opacity: 1, scaleY: 1 }} transition={{ delay: 0.2 }}>
-                <Waveform isPlaying={isMoving && audio.isPlaying} progress={audio.progress} />
+              <motion.div className="w-full max-w-[320px] h-12" initial={{ opacity: 0, scaleY: 0 }} animate={{ opacity: 1, scaleY: 1 }}>
+                <Waveform isPlaying={audio.isPlaying} progress={audio.progress} />
               </motion.div>
             )}
 
@@ -315,17 +313,15 @@ export default function VinylPlayer({
                 tap the tonearm to start
               </motion.p>
             )}
-            {needleDropped && !isMoving && !autoplay && !isReversing && (
+            {needleDropped && !isMoving && !autoplay && (
               <motion.p className="text-xs text-white/15 font-mono tracking-wider" animate={{ opacity: [0.15, 0.35, 0.15] }} transition={{ duration: 2.5, repeat: Infinity }}>
                 spin the vinyl or tap autoplay
               </motion.p>
             )}
-            {isMoving && !autoplay && !isReversing && (
+            {isMoving && audio.isPlaying && !autoplay && (
               <motion.div className="flex items-center gap-1.5 text-[10px] font-mono" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500/50 animate-pulse" />
-                <span className={playbackRate > 1.4 ? "text-orange-400/40" : playbackRate < 0.6 ? "text-blue-400/40" : "text-amber-500/40"}>
-                  {playbackRate > 1.4 ? "fast" : playbackRate < 0.6 ? "slow" : "perfect speed"}
-                </span>
+                <span className="text-amber-500/40">playing</span>
               </motion.div>
             )}
           </motion.div>
