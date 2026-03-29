@@ -66,7 +66,7 @@ create policy "Public photos read" on storage.objects
 create policy "Public photos upload" on storage.objects
   for insert with check (
     bucket_id = 'photos'
-    and (storage.extension(name) in ('jpg', 'jpeg', 'png', 'webp', 'gif'))
+    and (storage.extension(name) in ('jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'))
   );
 
 -- 6. Index for faster lookups

@@ -153,21 +153,20 @@ export function useAudioEngine(src: string | null) {
     }
   }, []);
 
-  const play = useCallback(() => {
+  const play = useCallback(async () => {
     if (!audioRef.current || !state.isLoaded) return;
     initAudioContext();
-    if (ctxRef.current?.state === "suspended") {
-      ctxRef.current.resume();
+
+    try {
+      // Resume AudioContext first — must happen in user gesture on iOS
+      if (ctxRef.current?.state === "suspended") {
+        await ctxRef.current.resume();
+      }
+      await audioRef.current.play();
+      setState((prev) => ({ ...prev, isPlaying: true, playbackBlocked: false }));
+    } catch {
+      setState((prev) => ({ ...prev, playbackBlocked: true, isPlaying: false }));
     }
-    audioRef.current
-      .play()
-      .then(() => {
-        setState((prev) => ({ ...prev, isPlaying: true, playbackBlocked: false }));
-      })
-      .catch(() => {
-        // Autoplay policy blocked playback — surface to UI
-        setState((prev) => ({ ...prev, playbackBlocked: true, isPlaying: false }));
-      });
   }, [state.isLoaded, initAudioContext]);
 
   const pause = useCallback(() => {

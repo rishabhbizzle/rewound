@@ -1,30 +1,36 @@
 // Client-side image processing — resize + compress before upload
-// Uses browser Canvas API, no server needed
-// Falls back to original file if processing fails for any reason
+// Handles HEIC (iPhone), HEIF, and all standard formats
+// Falls back to original file if processing fails
 
-const MAX_DIMENSION = 1200; // Max width or height
-const QUALITY = 0.82; // WebP/JPEG quality (0.82 is visually lossless)
+const MAX_DIMENSION = 1200;
+const QUALITY = 0.82;
 
+// iPhone photos are often HEIC — canvas can't read them directly.
+// We use the browser's built-in decoding via createImageBitmap which
+// handles HEIC on Safari/iOS. For the output we always convert to
+// JPEG (universal support, good compression).
 export async function processImage(file: File): Promise<File> {
   try {
     // Skip non-image files
-    if (!file.type.startsWith("image/")) return file;
+    if (!file.type.startsWith("image/") && !isHeic(file)) return file;
 
-    // Skip if already small enough
-    if (file.size < 200 * 1024) return file;
+    // Skip if already small enough AND not HEIC
+    if (file.size < 200 * 1024 && !isHeic(file)) return file;
 
-    // Skip GIFs (animated, can't process with canvas)
+    // Skip GIFs (animated)
     if (file.type === "image/gif") return file;
 
-    // Check if OffscreenCanvas is supported
-    if (typeof OffscreenCanvas === "undefined") {
-      return processImageFallback(file);
+    // Use createImageBitmap — it handles HEIC on iOS Safari natively
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      // If createImageBitmap fails (HEIC on non-Safari), try via img element
+      return processImageViaImgElement(file);
     }
 
-    const bitmap = await createImageBitmap(file);
     const { width, height } = bitmap;
 
-    // Calculate new dimensions keeping aspect ratio
     let newW = width;
     let newH = height;
 
@@ -38,54 +44,95 @@ export async function processImage(file: File): Promise<File> {
       }
     }
 
-    const canvas = new OffscreenCanvas(newW, newH);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      bitmap.close();
-      return file; // fallback to original
+    // Try OffscreenCanvas first, fall back to regular canvas
+    let blob: Blob | null = null;
+
+    if (typeof OffscreenCanvas !== "undefined") {
+      try {
+        const canvas = new OffscreenCanvas(newW, newH);
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0, newW, newH);
+          // Always output JPEG — universal support, HEIC compat
+          blob = await canvas.convertToBlob({
+            type: "image/jpeg",
+            quality: QUALITY,
+          });
+        }
+      } catch {
+        // fall through to regular canvas
+      }
     }
 
-    ctx.drawImage(bitmap, 0, 0, newW, newH);
+    if (!blob) {
+      // Fallback: regular canvas
+      const canvas = document.createElement("canvas");
+      canvas.width = newW;
+      canvas.height = newH;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        bitmap.close();
+        return file;
+      }
+      ctx.drawImage(bitmap, 0, 0, newW, newH);
+      blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", QUALITY);
+      });
+    }
+
     bitmap.close();
 
-    // Try WebP first, fall back to JPEG
-    let blob: Blob;
-    try {
-      blob = await canvas.convertToBlob({ type: "image/webp", quality: QUALITY });
-    } catch {
-      // WebP not supported (older Safari), use JPEG
-      blob = await canvas.convertToBlob({ type: "image/jpeg", quality: QUALITY });
+    if (!blob || blob.size >= file.size) {
+      // If HEIC, we MUST convert even if bigger — Supabase rejects HEIC
+      if (isHeic(file) && blob) {
+        const name = file.name.replace(/\.[^.]+$/, ".jpg");
+        return new File([blob], name, { type: "image/jpeg" });
+      }
+      return file;
     }
 
-    // If somehow bigger after processing, use original
-    if (blob.size >= file.size) return file;
-
-    const ext = blob.type === "image/webp" ? "webp" : "jpg";
-    const name = file.name.replace(/\.[^.]+$/, `.${ext}`);
-
-    return new File([blob], name, { type: blob.type });
+    const name = file.name.replace(/\.[^.]+$/, ".jpg");
+    return new File([blob], name, { type: "image/jpeg" });
   } catch {
-    // Any failure → return original file unmodified
+    // Last resort: if it's HEIC and everything failed, still try img element path
+    if (isHeic(file)) {
+      return processImageViaImgElement(file);
+    }
     return file;
   }
 }
 
-// Fallback for browsers without OffscreenCanvas (older Safari)
-function processImageFallback(file: File): Promise<File> {
+// Check if file is HEIC/HEIF (common iPhone format)
+function isHeic(file: File): boolean {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  return (
+    type === "image/heic" ||
+    type === "image/heif" ||
+    type === "" || // iOS sometimes sends empty type for HEIC
+    name.endsWith(".heic") ||
+    name.endsWith(".heif")
+  );
+}
+
+// Fallback: load via <img> element (works for formats the browser can display)
+function processImageViaImgElement(file: File): Promise<File> {
   return new Promise((resolve) => {
-    const img = new Image();
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+
     img.onload = () => {
       try {
-        let newW = img.width;
-        let newH = img.height;
+        let newW = img.naturalWidth;
+        let newH = img.naturalHeight;
 
         if (newW > MAX_DIMENSION || newH > MAX_DIMENSION) {
           if (newW > newH) {
             newW = MAX_DIMENSION;
-            newH = Math.round((img.height / img.width) * MAX_DIMENSION);
+            newH = Math.round((img.naturalHeight / img.naturalWidth) * MAX_DIMENSION);
           } else {
             newH = MAX_DIMENSION;
-            newW = Math.round((img.width / img.height) * MAX_DIMENSION);
+            newW = Math.round((img.naturalWidth / img.naturalHeight) * MAX_DIMENSION);
           }
         }
 
@@ -94,15 +141,17 @@ function processImageFallback(file: File): Promise<File> {
         canvas.height = newH;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
+          URL.revokeObjectURL(url);
           resolve(file);
           return;
         }
 
         ctx.drawImage(img, 0, 0, newW, newH);
+        URL.revokeObjectURL(url);
 
         canvas.toBlob(
           (blob) => {
-            if (!blob || blob.size >= file.size) {
+            if (!blob) {
               resolve(file);
               return;
             }
@@ -113,15 +162,20 @@ function processImageFallback(file: File): Promise<File> {
           QUALITY
         );
       } catch {
+        URL.revokeObjectURL(url);
         resolve(file);
       }
     };
-    img.onerror = () => resolve(file);
-    img.src = URL.createObjectURL(file);
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+
+    img.src = url;
   });
 }
 
-// Process multiple images in parallel — each one independently falls back
 export async function processImages(files: File[]): Promise<File[]> {
   return Promise.all(files.map(processImage));
 }

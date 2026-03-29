@@ -253,7 +253,7 @@ export default function CreatePage() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 flex flex-col items-center px-4 py-8 overflow-y-auto">
+    <div className="min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 flex flex-col items-center px-4 pt-8 pb-20 overflow-y-auto">
       {/* Header */}
       <motion.div
         className="mb-8 text-center"

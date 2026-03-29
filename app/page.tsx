@@ -5,7 +5,7 @@ import DustParticles from "@/components/DustParticles";
 
 export default function Home() {
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 flex flex-col items-center justify-center relative overflow-hidden px-6">
+    <div className="min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 flex flex-col items-center justify-center relative overflow-hidden px-6 py-16">
       <DustParticles />
 
       {/* Ambient glow */}

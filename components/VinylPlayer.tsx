@@ -143,10 +143,12 @@ export default function VinylPlayer({
     [audio]
   );
 
-  // Tap-to-unmute: if autoplay is blocked, a user tap on the player retries
-  const handleUnblock = useCallback(() => {
-    audio.play();
-  }, [audio]);
+  // Tap-to-unmute: user gesture triggers AudioContext resume + play
+  const handleUnblock = useCallback(async () => {
+    await audio.play();
+    // Also start autoplay so the vinyl spins after unblocking
+    if (!autoplay) setAutoplay(true);
+  }, [audio, autoplay, setAutoplay]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
