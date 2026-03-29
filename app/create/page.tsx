@@ -511,7 +511,7 @@ export default function CreatePage() {
                   type="text"
                   value={artist}
                   onChange={(e) => setArtist(e.target.value)}
-                  placeholder="Sarah"
+                  placeholder="Jordan"
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white/80 placeholder:text-white/15 focus:outline-none focus:border-white/20 transition-all"
                   maxLength={30}
                   autoComplete="off"
