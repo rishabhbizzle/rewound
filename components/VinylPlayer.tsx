@@ -58,19 +58,20 @@ export default function VinylPlayer({
   const audio = useAudioEngine(audioUrl);
   const haptics = useHaptics();
 
-  // Spinning forward = play, backwards = scratch, stopped = pause
+  // Sync: spinning forward → volume 1, reverse → scratch, stopped → volume 0
+  // NEVER calls play() or pause() — only volume + rate changes
   useEffect(() => {
     if (!needleDropped) return;
 
     if (isMoving && !isReversing) {
-      audio.play();
+      audio.setVolume(1);
       audio.setPlaybackRate(playbackRate);
       audio.setScratchVolume(0);
     } else if (isReversing) {
-      audio.pause();
+      audio.setVolume(0);
       audio.setScratchVolume(0.5);
     } else {
-      audio.pause();
+      audio.setVolume(0);
       audio.setScratchVolume(0);
     }
   }, [isMoving, isReversing, playbackRate, needleDropped, audio]);
@@ -108,96 +109,63 @@ export default function VinylPlayer({
     setTimeout(() => setStage("playing"), 900);
   }, []);
 
-  // Needle drop — user gesture, call play() here for iOS
+  // Needle drop = user gesture. start() plays silently, volume controls the rest.
   const handleNeedleDrop = useCallback(() => {
     setNeedleDropped(true);
     haptics.needleDrop();
-    // Init scratch SFX in user gesture
+    audio.start();
     audio.initScratch();
-    // Play in user gesture for iOS, then immediately pause
-    // so it only plays when user spins
-    audio.play();
-    setTimeout(() => audio.pause(), 50);
   }, [haptics, audio]);
 
   const toggleAutoplay = useCallback(() => {
-    if (!needleDropped) return;
-    // If turning on autoplay, also play in this gesture (iOS backup)
-    audio.play();
+    // Also start audio here as backup (user gesture)
+    audio.start();
     setAutoplay((prev) => !prev);
-  }, [setAutoplay, audio, needleDropped]);
+  }, [setAutoplay, audio]);
 
   const handleProgressSeek = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const rect = e.currentTarget.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      audio.seekToProgress(Math.max(0, Math.min(1, x / rect.width)));
+      audio.seekToProgress(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)));
     },
     [audio]
   );
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
   };
+
+  const audible = isMoving && !isReversing;
 
   return (
     <div className="relative flex flex-col min-h-[100dvh] bg-gradient-to-b from-zinc-950 via-[#0a0a0a] to-zinc-950 overflow-hidden">
-      {needleDropped && <MoodAmbient isPlaying={isMoving && audio.isPlaying} />}
+      {needleDropped && <MoodAmbient isPlaying={audible} />}
       <DustParticles />
       <Celebration trigger={celebrate} />
 
-      {/* Sleeve */}
       <AnimatePresence>
         {stage === "sleeve" && (
-          <motion.div
-            key="sleeve"
-            className="flex-1 flex items-center justify-center z-20 px-4"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -40 }}
-            transition={{ duration: 0.6 }}
-          >
-            <AlbumSleeve
-              title={title}
-              artist={artist}
-              coverPhoto={photos[0]}
-              onReveal={handleSleeveReveal}
-              isRevealed={false}
-              firstPlayDate={firstPlayedAt ? new Date(firstPlayedAt).toLocaleDateString() : undefined}
-            />
+          <motion.div key="sleeve" className="flex-1 flex items-center justify-center z-20 px-4"
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -40 }} transition={{ duration: 0.6 }}>
+            <AlbumSleeve title={title} artist={artist} coverPhoto={photos[0]} onReveal={handleSleeveReveal} isRevealed={false}
+              firstPlayDate={firstPlayedAt ? new Date(firstPlayedAt).toLocaleDateString() : undefined} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Player */}
       {(stage === "turntable" || stage === "playing") && (
-        <motion.div
-          key="player"
-          className="flex-1 flex flex-col z-20"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-        >
-          {/* Title */}
-          <motion.div
-            className="pt-[max(env(safe-area-inset-top),1rem)] px-4 pb-2 text-center"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-          >
+        <motion.div key="player" className="flex-1 flex flex-col z-20"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6, delay: 0.2 }}>
+
+          <motion.div className="pt-[max(env(safe-area-inset-top),1rem)] px-4 pb-2 text-center"
+            initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
             <h1 className="text-base font-semibold text-white/70 tracking-tight truncate">{title}</h1>
             <p className="text-xs text-white/25 mt-0.5">{artist}</p>
           </motion.div>
 
-          {/* Photos / note */}
-          <motion.div
-            className="flex-1 flex items-center justify-center min-h-0 py-2"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-          >
+          <motion.div className="flex-1 flex items-center justify-center min-h-0 py-2"
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
             {showNote && noteData ? (
               <motion.div className="w-full px-4" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6 }}>
                 <p className="text-center text-xs text-white/25 font-mono mb-3">a note for you</p>
@@ -216,21 +184,15 @@ export default function VinylPlayer({
             )}
           </motion.div>
 
-          {/* Bottom controls */}
-          <motion.div
-            className="px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] flex flex-col items-center gap-2"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
-          >
-            {/* Waveform */}
+          <motion.div className="px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] flex flex-col items-center gap-2"
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
+
             {needleDropped && (
               <motion.div className="w-full max-w-[320px] h-12" initial={{ opacity: 0, scaleY: 0 }} animate={{ opacity: 1, scaleY: 1 }}>
-                <Waveform isPlaying={audio.isPlaying} progress={audio.progress} />
+                <Waveform isPlaying={audible} progress={audio.progress} />
               </motion.div>
             )}
 
-            {/* Compact vinyl */}
             {photos.length > 0 && (
               <div className="relative">
                 <div className="absolute -inset-3 rounded-full bg-gradient-to-b from-zinc-900 to-zinc-950 border border-white/[0.04]" />
@@ -239,7 +201,6 @@ export default function VinylPlayer({
               </div>
             )}
 
-            {/* Progress bar */}
             {needleDropped && (
               <div className="w-full max-w-[280px] flex flex-col gap-1">
                 <div className="w-full h-[12px] flex items-center cursor-pointer group" onPointerDown={handleProgressSeek}>
@@ -256,41 +217,24 @@ export default function VinylPlayer({
               </div>
             )}
 
-            {/* Controls */}
             <div className="flex items-center gap-3">
               {needleDropped && (
                 <motion.button
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-mono transition-all ${
-                    autoplay
-                      ? "bg-amber-500/15 text-amber-400/70 border border-amber-500/20"
-                      : "bg-white/5 text-white/30 border border-white/5 hover:bg-white/8"
+                    autoplay ? "bg-amber-500/15 text-amber-400/70 border border-amber-500/20" : "bg-white/5 text-white/30 border border-white/5 hover:bg-white/8"
                   }`}
-                  onClick={toggleAutoplay}
-                  whileTap={{ scale: 0.95 }}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                >
+                  onClick={toggleAutoplay} whileTap={{ scale: 0.95 }}
+                  initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
                   {autoplay ? (
-                    <>
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-                      pause
-                    </>
+                    <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>pause</>
                   ) : (
-                    <>
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                      autoplay
-                    </>
+                    <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>autoplay</>
                   )}
                 </motion.button>
               )}
               {noteData && noteUnlocked && (
-                <motion.button
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-mono bg-white/5 text-white/30 border border-white/5 hover:bg-white/8 transition-all"
-                  onClick={() => setShowNote((v) => !v)}
-                  whileTap={{ scale: 0.95 }}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                >
+                <motion.button className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-mono bg-white/5 text-white/30 border border-white/5 hover:bg-white/8 transition-all"
+                  onClick={() => setShowNote((v) => !v)} whileTap={{ scale: 0.95 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
                   </svg>
@@ -299,15 +243,11 @@ export default function VinylPlayer({
               )}
             </div>
 
-            {/* Scratch indicator */}
             {isReversing && (
               <motion.div className="flex items-center gap-1.5 text-[10px] font-mono text-orange-400/50" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                <span className="w-1.5 h-1.5 rounded-full bg-orange-400/50" />
-                scratching
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-400/50" />scratching
               </motion.div>
             )}
-
-            {/* Hints */}
             {!needleDropped && photos.length > 0 && (
               <motion.p className="text-xs text-white/20 font-mono tracking-wider" animate={{ opacity: [0.2, 0.5, 0.2] }} transition={{ duration: 2.5, repeat: Infinity }}>
                 tap the tonearm to start
@@ -318,7 +258,7 @@ export default function VinylPlayer({
                 spin the vinyl or tap autoplay
               </motion.p>
             )}
-            {isMoving && audio.isPlaying && !autoplay && (
+            {audible && !autoplay && (
               <motion.div className="flex items-center gap-1.5 text-[10px] font-mono" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500/50 animate-pulse" />
                 <span className="text-amber-500/40">playing</span>

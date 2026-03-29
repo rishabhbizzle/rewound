@@ -60,7 +60,18 @@ export default function CreatePage() {
     setMicError(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+
+      // Prefer MP4 (works on iOS + all browsers). Fall back to webm.
+      const mimeType = MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "";
+
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -69,9 +80,15 @@ export default function CreatePage() {
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const actualMime = mediaRecorder.mimeType || "audio/webm";
+        const ext = actualMime.includes("mp4") ? "m4a"
+          : actualMime.includes("webm") ? "webm"
+          : actualMime.includes("ogg") ? "ogg"
+          : "wav";
+
+        const blob = new Blob(chunksRef.current, { type: actualMime });
         const url = URL.createObjectURL(blob);
-        const file = new File([blob], "recording.webm", { type: "audio/webm" });
+        const file = new File([blob], `recording.${ext}`, { type: actualMime });
         setAudioUrl(url);
         setAudioFile(file);
         setAudioFileName("Recording");
